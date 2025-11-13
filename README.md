@@ -15,7 +15,7 @@ Make sure your site has `Neos.Flow.http.baseUri` setting set, so your reviewers 
 
 ## Configuration for email notifications
 
-In order to send messages to emails you need to add configure the [neos/swiftmailer](https://swiftmailer-for-flow.readthedocs.io/en/latest/) credentials 
+In order to send messages to emails you need to configure the [neos/swiftmailer](https://swiftmailer-for-flow.readthedocs.io/en/latest/) credentials 
 
 Then you need to configure the target email addresses, together with the email content:
  

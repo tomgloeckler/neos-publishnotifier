@@ -6,71 +6,51 @@ namespace CodeQ\PublishNotifier;
 
 use Maknz\Slack\Client;
 use Neos\Flow\Annotations as Flow;
+use Neos\SymfonyMailer\Service\MailerService;
 use Psr\Log\LoggerInterface;
 use Neos\Flow\Configuration\Exception\InvalidConfigurationException;
-use Neos\SwiftMailer\Message;
+use Symfony\Component\Mime\Address;
+use Symfony\Component\Mime\Email;
 use Neos\ContentRepository\Domain\Model\Workspace;
 use Neos\ContentRepository\Domain\Model\NodeInterface;
 use Neos\ContentRepository\Domain\Service\PublishingServiceInterface;
 use Neos\Neos\Domain\Service\UserService;
+use Symfony\Component\Mime\Part\TextPart;
 
 /**
  * @Flow\Scope("singleton")
  */
 class Notifier
 {
-    /**
-     * @Flow\Inject
-     * @var LoggerInterface
-     */
-    protected $systemLogger;
+	#[Flow\Inject]
+	protected MailerService $mailerService;
 
-    /**
-     * @Flow\Inject
-     * @var UserService
-     */
-    protected $userService;
+	#[Flow\Inject]
+    protected LoggerInterface $systemLogger;
 
-    /**
-     * @Flow\Inject
-     * @var PublishingServiceInterface
-     */
-    protected $publishingService;
+    #[Flow\Inject]
+    protected UserService $userService;
 
-    /**
-     * @Flow\InjectConfiguration(package="Neos.Flow", path="http.baseUri")
-     * @var string
-     */
-    protected $baseUri;
+    #[Flow\Inject]
+    protected PublishingServiceInterface $publishingService;
 
-    /**
-     * @var array
-     */
-    protected $settings;
+	#[Flow\InjectConfiguration(path: 'http.baseUri', package: 'Neos.Flow')]
+    protected string $baseUri;
 
-    /**
-     * @var bool
-     */
-    protected $notificationHasBeenSentInCurrentInstance = false;
+    protected array $settings;
 
-    /**
-     * Inject the settings
-     *
-     * @param array $settings
-     * @return void
-     */
-    public function injectSettings(array $settings) {
+    protected bool $notificationHasBeenSentInCurrentInstance = false;
+
+    public function injectSettings(array $settings): void {
         $this->settings = $settings;
     }
 
     /**
      * Send out emails for a change in a workspace.
      *
-     * @param Workspace $targetWorkspace
-     * @return void
-     * @throws InvalidConfigurationException
-     */
-    protected function sendEmails($targetWorkspace)
+     * @throws InvalidConfigurationException|\Symfony\Component\Mailer\Exception\TransportExceptionInterface
+	 */
+    protected function sendEmails(Workspace $targetWorkspace): void
     {
         if(!$this->settings['email']['enabled']) {
             return;
@@ -85,24 +65,25 @@ class Notifier
         $currentUser = $this->userService->getCurrentUser();
         $currentUserName = $currentUser->getLabel();
         $targetWorkspaceName = $targetWorkspace->getTitle();
-        $reviewUrl = sprintf('%1$s/neos/management/workspaces/show?moduleArguments[workspace][__identity]=%2$s', $this->baseUri, $targetWorkspace->getName());
+        $reviewUrl = sprintf('%1$sneos/management/workspaces/show?moduleArguments[workspace][__identity]=%2$s', $this->baseUri, $targetWorkspace->getName());
 
         $senderAddress = $this->settings['email']['senderAddress'];
         $senderName = $this->settings['email']['senderName'];
         $subject = sprintf($this->settings['email']['subject'], $currentUserName);
         $body = sprintf($this->settings['email']['body'], $currentUserName, $targetWorkspaceName, $reviewUrl);
+		$body = new TextPart($body, 'utf-8', 'plain');
 
         foreach ($this->settings['email']['notifyEmails'] as $email) {
             try {
-                $mail = new Message();
+                $mail = new Email();
                 $mail
-                    ->setFrom(array($senderAddress => $senderName))
-                    ->setTo(array($email => $email))
-                    ->setSubject($subject);
-                $mail->setBody($body, 'text/plain');
-                $mail->send();
+                    ->from(new Address($senderAddress, $senderName))
+                    ->to(new Address($email))
+                    ->subject($subject);
+                $mail->setBody($body);
+                $this->mailerService->getMailer()->send($mail);
             } catch (\Exception $exception) {
-                $this->systemLogger->logException($exception);
+                $this->systemLogger->error($exception);
             }
         }
     }
@@ -110,11 +91,9 @@ class Notifier
     /**
      * Send out a slack message for a change in a workspace.
      *
-     * @param Workspace $targetWorkspace
-     * @return void
      * @throws InvalidConfigurationException
      */
-    protected function sendSlackMessages($targetWorkspace)
+    protected function sendSlackMessages(Workspace $targetWorkspace): void
     {
         if(!$this->settings['slack']['enabled']) {
             return;
